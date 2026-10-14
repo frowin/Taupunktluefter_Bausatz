@@ -146,6 +146,26 @@ void WIFI_Connect()
         delay(1);  // um den Watchdog zurückzusetzen       
         request->send(200, "text/html", Optionen, processor);
      });    
+  server.on("/saveOutsideTempSource", HTTP_POST, [](AsyncWebServerRequest * request) 
+     {
+       String source = "DHT22";
+       String rfId = rf433FormatId(RF433_sensor_id);
+       String tfaChannel = String(RF433_tfa_channel);
+
+       if (request->hasParam("source", true)) source = request->getParam("source", true)->value();
+       if (request->hasParam("rfid", true)) rfId = request->getParam("rfid", true)->value();
+       if (request->hasParam("tfach", true)) tfaChannel = request->getParam("tfach", true)->value();
+
+       if (Optionen_web_aussensensor_speichern(source, rfId, tfaChannel))
+       {
+         TONE (800, 200);
+         request->redirect("/Optionen");
+       }
+       else
+       {
+         request->send(400, "text/plain", "Ungueltige Aussen-Sensor Optionen");
+       }
+     });    
  //---------------------------------------------- Speicher------------------------------------------------
    server.on("/Speicher", HTTP_GET, [](AsyncWebServerRequest * request) 
      { 

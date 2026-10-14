@@ -289,6 +289,11 @@ char Optionen[] PROGMEM = R"rawliteral(
   .content { text-align: left; }
   .btn {color:white; border:none; padding:10px 20px;cursor:pointer;border-radius:4px;margin-right:5px;text-decoration:none;display:inline-block;}
   .pref-btn {background-color:#ff4c4c;}   /* Rot für Preferences */
+  .save-btn {background-color:#007bff;}
+  .rf-card{background:#fff;border-radius:8px;padding:12px;margin:12px 0;max-width:520px;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+  .rf-card label{display:block;font-weight:bold;margin-top:8px;}
+  .rf-card select,.rf-card input{font-size:16px;padding:6px;width:100%%;box-sizing:border-box;margin-top:4px;}
+  .rf-status{background:#eef4ff;border-left:4px solid #007bff;padding:8px;margin-top:10px;}
  </style>
 
 </head>
@@ -301,6 +306,32 @@ char Optionen[] PROGMEM = R"rawliteral(
   <table class="MsoTableGrid" border="1" cellspacing="3" cellpadding="0">
     %Optionen_String%
   </table>
+  <div class="rf-card">
+    <form action="/saveOutsideTempSource" method="POST">
+      <font size="4"><b>Au&szlig;en-Temperaturquelle</b></font>
+      <label for="source">Quelle</label>
+      <select id="source" name="source" onchange="updateRfFields()">
+        <option value="DHT22" %OutsideSourceDHTSelected%>DHT22</option>
+        <option value="433MHz" %OutsideSource433Selected%>433 MHz Acurite 606TX</option>
+        <option value="433TFA" %OutsideSourceTfaSelected%>433 MHz TFA 30.3250 (nur Temp)</option>
+        <option value="433TFA3249" %OutsideSourceTfa3249Selected%>433 MHz TFA 30.3249.02 (Temp+Feuchte)</option>
+      </select>
+      <div id="acuriteFields">
+        <label for="rfid">433 Sensor ID</label>
+        <input id="rfid" name="rfid" type="text" value="%RF433SensorID%">
+      </div>
+      <div id="tfaFields">
+        <label for="tfach">TFA Kanal (Schalter am Sensor)</label>
+        <select id="tfach" name="tfach">
+          <option value="2" %TfaCh2Selected%>1 &rarr; CH2</option>
+          <option value="3" %TfaCh3Selected%>2 &rarr; CH3</option>
+          <option value="4" %TfaCh4Selected%>3 &rarr; CH4</option>
+        </select>
+      </div>
+      <div class="rf-status">%RF433Status%</div>
+      <p><button class="btn save-btn" type="submit">Speichern</button></p>
+    </form>
+  </div>
  </div> 
     <button class="btn pref-btn" onclick="clearPrefs()">Alle Optionen l&oumlschen</button>
   <!-- Navigationsleiste -->
@@ -312,6 +343,12 @@ char Optionen[] PROGMEM = R"rawliteral(
   <a href="/Optionen" class="nav-item">Optionen</a>
  </nav>
 <script>
+  function updateRfFields(){
+    var s=document.getElementById('source').value;
+    document.getElementById('acuriteFields').style.display=(s==='433MHz')?'block':'none';
+    document.getElementById('tfaFields').style.display=(s==='433TFA'||s==='433TFA3249')?'block':'none';
+  }
+  updateRfFields();
   function clearPrefs(){if(confirm("Alle Einstellungen (Preferences) wirklich l&oumlschen? Dies setzt alle Optionen auf den Auslieferungszustand zur&uumlck!")) {fetch('/clearprefs').then(response => {location.reload();});}}
 </script>
 </body>
@@ -432,6 +469,15 @@ String processor(const String& var)
    if(var == "TP2")     return String(Taupunkt_2);
    if(var == "DeltaTP") return String(DeltaTP);
    if(var == "Stamp")   return make_time_stamp();
+   if(var == "OutsideSourceDHTSelected") if(outsideTempSource == OUTSIDE_TEMP_SOURCE_DHT22) return "selected"; else return "";
+   if(var == "OutsideSource433Selected") if(outsideTempSource == OUTSIDE_TEMP_SOURCE_433MHZ) return "selected"; else return "";
+   if(var == "OutsideSourceTfaSelected") if(outsideTempSource == OUTSIDE_TEMP_SOURCE_433_TFA) return "selected"; else return "";
+   if(var == "OutsideSourceTfa3249Selected") if(outsideTempSource == OUTSIDE_TEMP_SOURCE_433_TFA3249) return "selected"; else return "";
+   if(var == "RF433SensorID") return rf433FormatId(RF433_sensor_id);
+   if(var == "TfaCh2Selected") if(RF433_tfa_channel == 2) return "selected"; else return "";
+   if(var == "TfaCh3Selected") if(RF433_tfa_channel == 3) return "selected"; else return "";
+   if(var == "TfaCh4Selected") if(RF433_tfa_channel == 4) return "selected"; else return "";
+   if(var == "RF433Status") return getRF433StatusText();
    
    if(var == "Color-1")      if(rel == true) return "#009231"; else return "#364592";
    if(var == "Rel")          if(rel == true) return "L&uumlfter ist in Betrieb"; else return "L&uumlfter ist nicht in Betrieb";
@@ -447,8 +493,7 @@ String processor(const String& var)
    }
 
    //--------------------------------------------------------------- Chronik Datensätze in den HTML-Code einfügen -------------
-   if (use_Charts == false) return "";
-   else {
+   if (use_Charts == true) {
         if(var == "Chart_TimeDate") return Chart_TimeDate;
         if(var == "Chart_temp_in")  { f = Chart_temp_in;  f.replace(" ",""); return f; }
         if(var == "Chart_temp_out") { f = Chart_temp_out; f.replace(" ",""); return f; }   
@@ -486,6 +531,7 @@ String processor(const String& var)
                       TONE (800, 200);
                        return "";
                     };   
+   return String();
 }
 
 

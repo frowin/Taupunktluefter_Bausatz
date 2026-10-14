@@ -39,9 +39,25 @@ void Taupunkte_berechnen()
    h1 = dht1.readHumidity()+Korrektur_h_1;       // Innenluftfeuchtigkeit auslesen und unter „h1“ speichern
    t1 = dht1.readTemperature()+ Korrektur_t_1;   // Innentemperatur auslesen und unter „t1“ speichern
    h2 = dht2.readHumidity()+Korrektur_h_2;       // Außenluftfeuchtigkeit auslesen und unter „h2“ speichern
-   t2 = dht2.readTemperature()+ Korrektur_t_2;   // Außentemperatur auslesen und unter „t2“ 
+   t2 = readOutsideTemperature();                // Außentemperatur aus der gewählten Quelle
+   if (outsideTempSource == OUTSIDE_TEMP_SOURCE_433_TFA3249 && Funk433_hasValidHumidity())
+   {
+     h2 = Funk433_getHumidity() + Korrektur_h_2; // 30.3249.02 liefert Feuchte per 433 MHz
+   }
 
-  if (isnan(h1) || isnan(t1) || h1 > 100 || h1 < 1 || t1 < -40 || t1 > 80 || isnan(h2) || isnan(t2) || h2 > 100 || h2 < 1 || t2 < -40 || t2  > 80) fehler = true;
+  bool sensor1_ok = !(isnan(h1) || isnan(t1) || h1 > 100 || h1 < 1 || t1 < -40 || t1 > 80);
+  bool sensor2_ok = outsideTemperatureIsValid();
+  if (outsideTempSource == OUTSIDE_TEMP_SOURCE_DHT22)
+  {
+    sensor2_ok = sensor2_ok && !(isnan(h2) || h2 > 100 || h2 < 1);
+  }
+  if (outsideTempSource == OUTSIDE_TEMP_SOURCE_433_TFA3249)
+  {
+    sensor2_ok = sensor2_ok && Funk433_hasValidHumidity();
+  }
+  bool taupunkt2_ok = sensor2_ok && !(isnan(h2) || h2 > 100 || h2 < 1);
+
+  if (!sensor1_ok || !sensor2_ok) fehler = true;
   
   if (fehler == true)  // Prüfen, ob gültige Werte von den Sensoren kommen -----------------------------
   {   
@@ -49,7 +65,7 @@ void Taupunkte_berechnen()
     OLED_println("Teste Sensoren..",0,0); 
     Serial_Debugging_println ("Teste Sensoren..");    
     fehler = false; 
-    if (isnan(h1) || isnan(t1) || h1 > 100 || h1 < 1 || t1 < -40 || t1 > 80 )   // wenn eins zutrifft, dann fehler = true
+    if (!sensor1_ok)   // wenn eins zutrifft, dann fehler = true
     {
       blink_LED(2,5);
       OLED_println("Fehler Sensor 1",2,0);
@@ -63,7 +79,7 @@ void Taupunkte_berechnen()
      OLED_update();
      delay(500);  // Zeit um das oled zu lesen
   
-      if (isnan(h2) || isnan(t2) || h2 > 100 || h2 < 1 || t2 < -40 || t2  > 80)  // wenn eins zutrifft, dann fehler = true
+      if (!sensor2_ok)  // DHT22 mode checks DHT22, 433 MHz mode checks the fresh RF temperature
       {
         blink_LED(3,5);
         OLED_println("Fehler Sensor 2",3,0);
@@ -96,14 +112,15 @@ void Taupunkte_berechnen()
 
     //------------------ Taupunkte errechnen ----------------------------------
  
- Taupunkt_1 = taupunkt(t1, h1);
- Taupunkt_2 = taupunkt(t2, h2);
- DeltaTP = Taupunkt_1 - Taupunkt_2; 
+ Taupunkt_1 = sensor1_ok ? taupunkt(t1, h1) : NAN;
+ Taupunkt_2 = taupunkt2_ok ? taupunkt(t2, h2) : NAN;
+ DeltaTP = (!isnan(Taupunkt_1) && !isnan(Taupunkt_2)) ? (Taupunkt_1 - Taupunkt_2) : NAN; 
    //---------------------------------------------- Chronik aktualisieren ---------------------------------------------
   if (Datenspeicher > 0) 
     if (chronik_update_all() == false) Serial_Debugging_println("Chronik Update fehlgeschlagen");
     
  //------------------------------------------------ Relais schalten ---------------------------------------------------
+  if (isnan(DeltaTP)) rel = false;
   if (DeltaTP > (SCHALTmin + HYSTERESE))rel = true;
   if (DeltaTP < SCHALTmin)rel = false;
   if ((t1 < TEMP1_min) or (t1 >TEMP1_max)) rel = false;

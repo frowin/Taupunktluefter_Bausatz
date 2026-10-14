@@ -7,8 +7,8 @@
 // 06/2026
 //////////////////////////////////////////////////////////////////////////////
 
-String Software_version = "7.0";
-#define Hostname     "TPL-V7.0"
+String Software_version = "7.2.10";
+#define Hostname     "TPL-V7.2.10"
 #define use_OLED true
 
 // Dieser Code benötig zwingend die folgenden Libraries:
@@ -24,6 +24,7 @@ String Software_version = "7.0";
 #include <esp_task_wdt.h>
 #include <StreamString.h>
 #include "LittleFS.h"
+#include "tfa_3250_decode/tfa_3250_decode.h"
 
 GyverOLED<SSH1106_128x64> oled;
 static AsyncWebServer server(80);
@@ -160,6 +161,21 @@ int String_to_int( String S);
 bool Bool(String s);
 //-------------------------Taupunktberechnung ------------------
 void Taupunkte_berechnen();
+//-------------------------Aussensensor -------------------------
+void AussenSensor_setup();
+float readOutsideTemperature();
+bool outsideTemperatureIsValid();
+const char* getOutsideSourceName();
+String getRF433StatusText();
+String rf433FormatId(int id);
+void Funk433_setup();
+void Funk433_loop();
+bool Funk433_hasValidTemperature();
+float Funk433_getTemperature();
+bool Funk433_hasValidHumidity();
+float Funk433_getHumidity();
+//-------------------------Web Optionen -------------------------
+bool Optionen_web_aussensensor_speichern(String source, String rfId, String tfaChannel);
 //************************************************** Prototyping Ende *********************************
 
 //******************************** Deklaration von globalen Variabeln *********************************
@@ -176,6 +192,7 @@ int delay_interval_3 = 1500; // Dauer allgemeine Anzeigen
 #define DHTPIN_2 4        // Datenleitung für den DHT Sensor 2 (außen)
 #define DHT_Power_Pin 23  //Stromversorgung der DHT-Sensoren
 #define Tone_pin 19       // Pin für den Buzzer
+#define RF433_DATA_PIN 16 // Datenleitung WL-101-341 433 MHz Empfänger
 
 #define RELAIS_EIN HIGH
 #define RELAIS_AUS LOW
@@ -183,11 +200,22 @@ bool rel = false;
 bool fehler = true;
 volatile char focus;
 //************************************** Sensoren **********************************************************
+enum OutsideTempSource {
+  OUTSIDE_TEMP_SOURCE_DHT22 = 0,
+  OUTSIDE_TEMP_SOURCE_433MHZ = 1,
+  OUTSIDE_TEMP_SOURCE_433_TFA = 2,
+  OUTSIDE_TEMP_SOURCE_433_TFA3249 = 3
+};
+
 #define DHTTYPE_1 DHT22           // DHT 22 
 #define DHTTYPE_2 DHT22           // DHT 22  
 DHT dht1(DHTPIN_1, DHTTYPE_1);    //Der Innensensor wird ab jetzt mit dht1 angesprochen
 DHT dht2(DHTPIN_2, DHTTYPE_2);    //Der Außensensor wird ab jetzt mit dht2 angesprochen
 float t1, h1, t2, h2, Taupunkt_1, Taupunkt_2, DeltaTP;  // Variablen für die Sensor und Taupunktwerte
+OutsideTempSource outsideTempSource = OUTSIDE_TEMP_SOURCE_DHT22;
+int RF433_sensor_id = 0x61;
+int RF433_tfa_channel = 2; // sensor dial 1 → CH2, dial 2 → CH3, dial 3 → CH4
+unsigned long RF433_max_age_ms = 120000; // TFA 30.3249/30.3250 senden nur alle ~50-60s
 
 // ***************************   Korrekturwerte der einzelnen Sensoren*****  ********************************
 float Korrektur_t_1 = 0;   // Korrekturwert Innensensor Temperatur
@@ -307,6 +335,7 @@ void setup()
   //--------------------------------------------- Sensoren starten ------------------------------------------------------------------------
   dht1.begin(); 
   dht2.begin(); 
+  AussenSensor_setup();
   
   digitalWrite(RELAIPIN, RELAIS_AUS); // Relais ausschalten
   Serial_Debugging_println("Relais ausgeschaltet");
@@ -322,6 +351,7 @@ void setup()
 void loop() 
 {    
  Watchdog_reset();
+ Funk433_loop();
  if (use_WIFI == true) WIFI_watch_Task(); // Kontrolliert alle 60000 ms, ob WIFI noch vorhanden ist
  if ((last_calculation + 10000) < millis()) Taupunkte_berechnen(); // alle 10 Sekunden die Werte neu ermitteln  
  if ((digitalRead(debugingPin)) == LOW)serial_debugging_all();

@@ -40,7 +40,12 @@ typedef struct {
 char Zeichenfolge[laenge_Zeichenfolge]; 
 }param;
 
-
+#ifndef WIFI_SSID
+#define WIFI_SSID "FritzUS"
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+#endif
 
 param Parameter[] = {       
 
@@ -57,6 +62,9 @@ param Parameter[] = {
   {"Temp. aussen",        2,       'F',   "0.0"},
   {"Luftf. innen",        2,       'F',   "0.0"},
   {"Luftf. aussen",       2,       'F',   "0.0"},
+  {"Temp Quelle aus",     2,       'S',   "DHT22"},
+  {"433 Sensor ID",       2,       'S',   "0x61"},
+  {"433 TFA Kanal",       2,       'S',   "2"},
   
   {"Temp. Optionen",      3,       'M',   "-"}, // Temperatur Optionen
   {"Min delta TP",        3,       'F',   "2"},
@@ -69,8 +77,8 @@ param Parameter[] = {
   {"IP-Adresse",          4,       'S',   "DHCP"},
   {"Gateway",             4,       'S',   "192.168.178.1"},
   {"Mask",                4,       'S',   "255.255.255.0"},
-  {"SSID",                4,       'S',   "FritzUS"},
-  {"Passwort",            4       ,'S',   "48094564919405773644"},  
+  {"SSID",                4,       'S',   WIFI_SSID},
+  {"Passwort",            4,       'S',   WIFI_PASSWORD},
   {"DNS",                 4,       'S',   "192.168.178.1"},          // ACHTUNG!!! DNS2 = (8.8.8.8) fest vergeben!
 
   {"Wartung",             5,       'M',   "-"},   // Wartung
@@ -81,7 +89,7 @@ param Parameter[] = {
 
 bool Option_Aenderung = false;  // wurde an den Optionen etwas geändert?
 byte Anzahl_Menues = 5;
-byte Anzahl_Elemente = 28; 
+byte Anzahl_Elemente = 31; 
 
 byte ParameterSelected = 0;
 long Last_click = millis(); // wie lange wurde der Encoder nicht geklickt
@@ -389,6 +397,27 @@ void Optionen_loeschen()
   preferences.end();
 }
 
+int RF433_parse_sensor_id(String value)
+{
+  value.trim();
+  if (value.length() == 0) return -1;
+  if (StringVergleich(value, "61")) return 0x61; // legacy default meant sn 0x61
+
+  int base = 10;
+  const char* start = value.c_str();
+  if (value.startsWith("0x") || value.startsWith("0X"))
+  {
+    base = 16;
+    start += 2;
+  }
+
+  char* endPtr;
+  long id = strtol(start, &endPtr, base);
+  if (*endPtr != '\0') return -1;
+  if (id < 0 || id > 255) return -1;
+  return (int)id;
+}
+
 void Optionen_zu_Variablen()
 {
   int i;
@@ -398,6 +427,24 @@ void Optionen_zu_Variablen()
     if( StringVergleich(String(Parameter[i].Bezeichnung), "Temp. aussen"))       Korrektur_t_2 = String_to_float(Parameter[i].Zeichenfolge);
     if( StringVergleich(String(Parameter[i].Bezeichnung), "Luftf. innen"))       Korrektur_h_1 = String_to_float(Parameter[i].Zeichenfolge);
     if( StringVergleich(String(Parameter[i].Bezeichnung), "Luftf. aussen"))      Korrektur_h_2 = String_to_float(Parameter[i].Zeichenfolge);
+    if( StringVergleich(String(Parameter[i].Bezeichnung), "Temp Quelle aus")) {
+                                                                        String quelle = String(Parameter[i].Zeichenfolge);
+                                                                        quelle.trim();
+                                                                        if (StringVergleich(quelle, "433MHz")) outsideTempSource = OUTSIDE_TEMP_SOURCE_433MHZ;
+                                                                        else if (StringVergleich(quelle, "433TFA")) outsideTempSource = OUTSIDE_TEMP_SOURCE_433_TFA;
+                                                                        else if (StringVergleich(quelle, "433TFA3249")) outsideTempSource = OUTSIDE_TEMP_SOURCE_433_TFA3249;
+                                                                        else outsideTempSource = OUTSIDE_TEMP_SOURCE_DHT22;
+                                                                      }
+    if( StringVergleich(String(Parameter[i].Bezeichnung), "433 Sensor ID")) {
+                                                                        int id = RF433_parse_sensor_id(Parameter[i].Zeichenfolge);
+                                                                        if (id >= 0) RF433_sensor_id = id;
+                                                                        else RF433_sensor_id = 0x61;
+                                                                      }
+    if( StringVergleich(String(Parameter[i].Bezeichnung), "433 TFA Kanal")) {
+                                                                        int ch = String_to_int(Parameter[i].Zeichenfolge);
+                                                                        if (ch >= 2 && ch <= 4) RF433_tfa_channel = ch;
+                                                                        else RF433_tfa_channel = 2;
+                                                                      }
     
     //------------------------------------------------------------- Temperatur Optionen --------------------------------------------------------
     if( StringVergleich(String(Parameter[i].Bezeichnung), "Min delta TP"))       SCHALTmin = String_to_float(Parameter[i].Zeichenfolge);
@@ -443,6 +490,50 @@ void Optionen_zu_Variablen()
 }
 
 
+bool Optionen_set_parameter(const char* name, String value)
+{
+  for(int i = 0 ; i < Anzahl_Elemente ; i++)
+  {
+    if(StringVergleich(String(Parameter[i].Bezeichnung), String(name)))
+    {
+      value.toCharArray(Parameter[i].Zeichenfolge, laenge_Zeichenfolge);
+      return Save_one_Item(i);
+    }
+  }
+  return false;
+}
+
+bool Optionen_web_aussensensor_speichern(String source, String rfId, String tfaChannel)
+{
+  source.trim();
+  rfId.trim();
+  tfaChannel.trim();
+
+  if (StringVergleich(source, "433MHz")) source = "433MHz";
+  else if (StringVergleich(source, "433TFA")) source = "433TFA";
+  else if (StringVergleich(source, "433TFA3249")) source = "433TFA3249";
+  else source = "DHT22";
+
+  int id = RF433_parse_sensor_id(rfId);
+  if (StringVergleich(source, "433MHz") && id < 0) return false;
+  if (id < 0) id = RF433_sensor_id;
+
+  int ch = String_to_int(tfaChannel);
+  if (ch < 2 || ch > 4)
+  {
+    if (StringVergleich(source, "433TFA") || StringVergleich(source, "433TFA3249")) return false;
+    ch = RF433_tfa_channel;
+    if (ch < 2 || ch > 4) ch = 2;
+  }
+
+  bool resultSource = Optionen_set_parameter("Temp Quelle aus", source);
+  bool resultId = Optionen_set_parameter("433 Sensor ID", rf433FormatId(id));
+  bool resultCh = Optionen_set_parameter("433 TFA Kanal", String(ch));
+  Optionen_zu_Variablen();
+  return resultSource && resultId && resultCh;
+}
+
+
 byte String_to_MenuePos(String s)
 {
   for( int i = 0; i < Anzahl_Elemente; i++)
@@ -452,6 +543,7 @@ byte String_to_MenuePos(String s)
       return i;
    }
   }
+  return 0;
 }
 
 
